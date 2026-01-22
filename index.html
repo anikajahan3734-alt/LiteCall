@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; color: white; text-align: center; font-family: sans-serif; overflow: hidden; }
+        #remote-v { width: 100vw; height: 100vh; background: #000; object-fit: cover; position: fixed; top: 0; left: 0; z-index: 1; }
+        #ui-box { position: fixed; bottom: 0; width: 100%; background: rgba(0,0,0,0.8); z-index: 10; padding: 10px 0; transition: 0.4s; }
+        #ui-box.hide { transform: translateY(100%); opacity: 0; pointer-events: none; }
+        .btn { padding: 12px; margin: 4px; border-radius: 8px; border: none; font-weight: bold; color: white; width: 46%; font-size: 13px; }
+        .v-msg-btn { background: #ffc107; color: black; width: 94%; margin-bottom: 10px; }
+        .file-btn { background: #007bff; }
+        .call-btn { background: #28a745; }
+        .clear-btn { background: #6c757d; }
+        .reload-btn { background: #dc3545; }
+        #info { font-size: 16px; color: yellow; font-weight: bold; margin-bottom: 10px; }
+    </style>
+</head>
+<body onclick="toggleUI()">
+    <video id="remote-v" autoplay playsinline></video>
+    <div id="ui-box">
+        <div id="info">লোড হচ্ছে...</div>
+        <button class="btn v-msg-btn" id="vBtn">ভয়েস মেসেজ (চেপে ধরুন)</button>
+        <button class="btn file-btn" onclick="sendV(event)">ভিডিও পাঠান</button>
+        <button class="btn call-btn" onclick="makeC(event)">লাইভ কল</button>
+        <button class="btn clear-btn" onclick="clearCall(event)">কল ডিলিট</button>
+        <button class="btn reload-btn" onclick="location.reload()">রিলোড</button>
+    </div>
+
+    <script>
+        // ফোন চেনার সহজ লজিক: বাটন ফোনের স্ক্রিন ছোট হয়
+        const isButtonPhone = window.innerWidth < 300;
+        const myId = isButtonPhone ? "1" : "2";
+        const targetId = isButtonPhone ? "2" : "1";
+        
+        document.getElementById('info').innerText = "আপনার আইডি: " + myId + " (বন্ধুর আইডি: " + targetId + ")";
+
+        const peer = new Peer(myId);
+        let stream, rec, chunks = [], currentCall;
+
+        navigator.mediaDevices.getUserMedia({ audio: true, video: true }).then(s => { stream = s; });
+
+        function toggleUI() { document.getElementById('ui-box').classList.toggle('hide'); }
+
+        function clearCall(e) {
+            e.stopPropagation();
+            if (currentCall) currentCall.close();
+            const v = document.getElementById('remote-v');
+            v.srcObject = null; v.src = "";
+            document.getElementById('ui-box').classList.remove('hide');
+        }
+
+        function sendV(e) {
+            e.stopPropagation();
+            const inp = document.createElement('input');
+            inp.type = 'file'; inp.accept = 'video/*';
+            inp.onchange = ev => {
+                const conn = peer.connect(targetId);
+                conn.on('open', () => conn.send({ file: ev.target.files[0], mime: ev.target.files[0].type }));
+            };
+            inp.click();
+        }
+
+        const vBtn = document.getElementById('vBtn');
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(s => {
+            rec = new MediaRecorder(s);
+            rec.ondataavailable = ev => chunks.push(ev.data);
+            rec.onstop = () => {
+                const conn = peer.connect(targetId);
+                conn.on('open', () => conn.send({ file: new Blob(chunks) }));
+                chunks = [];
+            };
+        });
+        vBtn.onmousedown = () => { rec.start(); vBtn.innerText = "রেকর্ড হচ্ছে..."; };
+        vBtn.onmouseup = () => { rec.stop(); vBtn.innerText = "ভয়েস মেসেজ (চেপে ধরুন)"; };
+
+        peer.on('connection', conn => {
+            conn.on('data', data => {
+                document.getElementById('remote-v').src = URL.createObjectURL(new Blob([data.file], { type: data.mime || 'audio/mp3' }));
+                document.getElementById('remote-v').play();
+                document.getElementById('ui-box').classList.add('hide');
+            });
+        });
+
+        peer.on('call', call => {
+            currentCall = call; call.answer(stream);
+            call.on('stream', s => { 
+                document.getElementById('remote-v').srcObject = s;
+                document.getElementById('ui-box').classList.add('hide');
+            });
+        });
+
+        function makeC(e) {
+            e.stopPropagation();
+            currentCall = peer.call(targetId, stream);
+            currentCall.on('stream', s => { 
+                document.getElementById('remote-v').srcObject = s;
+                document.getElementById('ui-box').classList.add('hide');
+            });
+        }
+    </script>
+</body>
+</html>
